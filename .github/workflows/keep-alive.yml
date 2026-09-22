@@ -1,0 +1,19 @@
+# TEMPORARY: pings the Fly app every 5 minutes so it doesn't auto-stop
+# mid-analysis while the initial backlog of games is being analyzed
+# (that run happens in a background thread with no open browser tab
+# required, but Fly's auto_stop_machines only looks at connection count,
+# not CPU load). Delete this file once the backlog finishes — future
+# weekly runs are small enough not to need it.
+name: Keep Fly app alive during backlog analysis
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the app
+        run: curl -sS -o /dev/null -w "HTTP %{http_code}\n" --max-time 20 https://chess-game-analyzer.fly.dev/ || true
