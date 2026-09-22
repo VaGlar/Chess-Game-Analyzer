@@ -56,9 +56,18 @@ CREATE TABLE IF NOT EXISTS analysis_status (
     total INTEGER NOT NULL DEFAULT 0,
     started_at TEXT,
     cancel_requested INTEGER NOT NULL DEFAULT 0,
-    error TEXT
+    error TEXT,
+    last_progress_at TEXT,
+    ema_seconds REAL
 );
 """
+
+# analysis_status predates last_progress_at/ema_seconds; CREATE TABLE IF NOT
+# EXISTS won't add columns to an already-deployed DB, so migrate by hand.
+_ANALYSIS_STATUS_MIGRATIONS = [
+    ("last_progress_at", "TEXT"),
+    ("ema_seconds", "REAL"),
+]
 
 
 def get_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
@@ -77,6 +86,10 @@ def init_db(db_path: str = DB_PATH) -> sqlite3.Connection:
     conn.execute(
         "INSERT OR IGNORE INTO analysis_status (id, running, done, total) VALUES (1, 0, 0, 0)"
     )
+    existing_columns = {row["name"] for row in conn.execute("PRAGMA table_info(analysis_status)")}
+    for column, sql_type in _ANALYSIS_STATUS_MIGRATIONS:
+        if column not in existing_columns:
+            conn.execute(f"ALTER TABLE analysis_status ADD COLUMN {column} {sql_type}")
     conn.commit()
     return conn
 
@@ -85,20 +98,47 @@ def get_analysis_status(conn: sqlite3.Connection) -> sqlite3.Row:
     return conn.execute("SELECT * FROM analysis_status WHERE id = 1").fetchone()
 
 
+_EMA_ALPHA = 0.3  # weight on the most recently finished game vs. history
+
+
 def start_analysis_status(conn: sqlite3.Connection, total: int) -> None:
+    now = datetime.datetime.utcnow().isoformat()
     conn.execute(
         """
         UPDATE analysis_status
-        SET running = 1, done = 0, total = ?, started_at = ?, cancel_requested = 0, error = NULL
+        SET running = 1, done = 0, total = ?, started_at = ?, cancel_requested = 0,
+            error = NULL, last_progress_at = ?, ema_seconds = NULL
         WHERE id = 1
         """,
-        (total, datetime.datetime.utcnow().isoformat()),
+        (total, now, now),
     )
     conn.commit()
 
 
 def update_analysis_progress(conn: sqlite3.Connection, done: int) -> None:
-    conn.execute("UPDATE analysis_status SET done = ? WHERE id = 1", (done,))
+    """Record progress and update a smoothed (EMA) seconds-per-game estimate
+    from the time since the previous update — i.e. how long the game that
+    just finished actually took — rather than a since-the-start average.
+    A since-start average is dragged around by however the very first games
+    happened to go and never really settles; the EMA tracks the recent,
+    current rate instead, so it converges to steady state instead of
+    climbing indefinitely while an early fast/slow patch washes out.
+    """
+    now = datetime.datetime.utcnow()
+    row = conn.execute(
+        "SELECT last_progress_at, ema_seconds FROM analysis_status WHERE id = 1"
+    ).fetchone()
+    ema = row["ema_seconds"]
+    if row["last_progress_at"]:
+        last_at = datetime.datetime.fromisoformat(row["last_progress_at"])
+        latest_game_seconds = (now - last_at).total_seconds()
+        ema = latest_game_seconds if ema is None else (
+            _EMA_ALPHA * latest_game_seconds + (1 - _EMA_ALPHA) * ema
+        )
+    conn.execute(
+        "UPDATE analysis_status SET done = ?, last_progress_at = ?, ema_seconds = ? WHERE id = 1",
+        (done, now.isoformat(), ema),
+    )
     conn.commit()
 
 
