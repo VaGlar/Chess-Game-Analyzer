@@ -26,7 +26,7 @@ username = st.sidebar.text_input("chess.com username", value=st.session_state.ge
 
 with st.sidebar.expander("Fetch new games"):
     col1, col2 = st.columns(2)
-    year = col1.number_input("Year (optional)", min_value=2007, max_value=2100, value=0, step=1)
+    year = col1.number_input("Year (optional, 0 = all)", min_value=0, max_value=2100, value=0, step=1)
     month = col2.number_input("Month (optional)", min_value=0, max_value=12, value=0, step=1)
     if st.button("Fetch from chess.com", disabled=not username):
         with st.spinner("Fetching games..."):
