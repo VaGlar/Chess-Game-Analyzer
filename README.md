@@ -85,6 +85,20 @@ automatically (or trigger one manually from the Actions tab — the workflow
 also has `workflow_dispatch`). The Codespace used for setup can be deleted
 afterwards; it's not needed for ongoing deploys.
 
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest tests/ -v
+```
+
+Most tests seed an in-memory DB directly (fast, no Stockfish needed) and
+cover the dashboard modules, fetch parsing, and the background-analysis
+self-healing logic. A handful in `test_analysis_engine.py` run the real
+Stockfish pipeline on tiny synthetic games — they auto-skip if Stockfish
+isn't on PATH. `.github/workflows/tests.yml` runs the full suite on every
+push/PR.
+
 ## Config
 
 Environment variables (all optional, already set correctly inside the
