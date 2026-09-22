@@ -16,6 +16,13 @@ ENGINE_THREADS = int(os.environ.get("CHESS_ANALYZER_THREADS", str(os.cpu_count()
 # multi-threaded search; a bit more room reduces repeated work.
 ENGINE_HASH_MB = int(os.environ.get("CHESS_ANALYZER_HASH_MB", "128"))
 
+# Restart the Stockfish process after this many games in a single analysis
+# run. A single long-lived engine process can slow down over a long run
+# (hash table fill/fragmentation); a periodic fresh process is cheap
+# insurance against that, invisible in the UI since the run itself doesn't
+# stop — just the underlying process gets swapped out between games.
+ENGINE_RESTART_EVERY_N_GAMES = int(os.environ.get("CHESS_ANALYZER_RESTART_EVERY", "2"))
+
 # Centipawn-loss thresholds used to classify a move.
 INACCURACY_CP = 50
 MISTAKE_CP = 100

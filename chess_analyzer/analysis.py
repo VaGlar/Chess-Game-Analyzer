@@ -17,6 +17,7 @@ from chess_analyzer.config import (
     BLUNDER_CP,
     ENGINE_DEPTH,
     ENGINE_HASH_MB,
+    ENGINE_RESTART_EVERY_N_GAMES,
     ENGINE_THREADS,
     INACCURACY_CP,
     MISTAKE_CP,
@@ -117,6 +118,12 @@ def analyze_game(engine: chess.engine.SimpleEngine, pgn_text: str, depth: int = 
     return rows
 
 
+def _spawn_engine(stockfish_path: str, threads: int, hash_mb: int) -> chess.engine.SimpleEngine:
+    engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
+    engine.configure({"Threads": threads, "Hash": hash_mb})
+    return engine
+
+
 def analyze_pending_games(
     conn: Optional[sqlite3.Connection] = None,
     stockfish_path: str = STOCKFISH_PATH,
@@ -124,6 +131,7 @@ def analyze_pending_games(
     limit_games: Optional[int] = None,
     threads: int = ENGINE_THREADS,
     hash_mb: int = ENGINE_HASH_MB,
+    restart_every: int = ENGINE_RESTART_EVERY_N_GAMES,
     progress_callback: Optional[Callable[[int, int], None]] = None,
     should_cancel: Optional[Callable[[], bool]] = None,
 ) -> int:
@@ -134,6 +142,11 @@ def analyze_pending_games(
     progress through a long run. If given, should_cancel() is checked before
     each game; returning True stops the run cleanly (already-committed
     games are kept, nothing partial is written).
+
+    The Stockfish process is restarted every `restart_every` games (0/None
+    disables this) — a single long-lived process can slow down over a long
+    run, and a periodic fresh one is cheap insurance against that. It's
+    invisible to the caller: progress just keeps climbing across the swap.
     """
     own_conn = conn is None
     conn = conn or init_db()
@@ -147,12 +160,17 @@ def analyze_pending_games(
             return 0
         total = len(games)
 
-        engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
-        engine.configure({"Threads": threads, "Hash": hash_mb})
+        engine = _spawn_engine(stockfish_path, threads, hash_mb)
+        games_on_current_engine = 0
         try:
             for row in games:
                 if should_cancel and should_cancel():
                     break
+                if restart_every and games_on_current_engine >= restart_every:
+                    engine.quit()
+                    engine = _spawn_engine(stockfish_path, threads, hash_mb)
+                    games_on_current_engine = 0
+
                 move_rows = analyze_game(engine, row["pgn"], depth=depth)
                 for mr in move_rows:
                     conn.execute(
@@ -173,6 +191,7 @@ def analyze_pending_games(
                 conn.execute("UPDATE games SET analyzed = 1 WHERE id = ?", (row["id"],))
                 conn.commit()
                 count += 1
+                games_on_current_engine += 1
                 if progress_callback:
                     progress_callback(count, total)
         finally:
