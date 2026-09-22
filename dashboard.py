@@ -96,15 +96,36 @@ if game_count == 0:
     st.warning("No games stored yet. Fetch games from the sidebar.")
     st.stop()
 
-(
-    tab_rating, tab_blunders, tab_accuracy, tab_worst_moves,
-    tab_win_loss, tab_openings, tab_time, tab_game_detail,
-) = st.tabs([
+SECTIONS = [
     "Rating", "Blunder analysis", "Accuracy score", "Worst moves",
     "Win/Loss patterns", "Openings", "Time management", "Game detail",
-])
+]
+st.session_state.setdefault("active_section", SECTIONS[0])
+st.session_state.setdefault("jump_game_id", None)
+st.session_state.setdefault("jump_ply", None)
 
-with tab_rating:
+# A widget-bound session_state key (like "active_section" below) can't be
+# reassigned after its widget has rendered in the same script run. So a
+# jump only *requests* a section via this separate key; the request is
+# applied here, before the radio widget is created, on the rerun it triggers.
+if st.session_state.get("pending_section"):
+    st.session_state["active_section"] = st.session_state.pop("pending_section")
+
+
+def jump_to_game(game_id: int, ply: int | None = None) -> None:
+    """Used by "→" buttons elsewhere to open a specific game (and
+    optionally highlight one move) in the Game detail section.
+    """
+    st.session_state["jump_game_id"] = game_id
+    st.session_state["jump_ply"] = ply
+    st.session_state["pending_section"] = "Game detail"
+    st.rerun()
+
+
+active_section = st.radio("Section", SECTIONS, horizontal=True, key="active_section",
+                           label_visibility="collapsed")
+
+if active_section == "Rating":
     st.subheader("Rating over time")
     rating_df = rating_progression(conn, username)
     if rating_df.empty:
@@ -120,7 +141,7 @@ with tab_rating:
         for col, (_, row) in zip(cols, latest.iterrows()):
             col.metric(f"Current {row['time_class']}", int(row["my_rating"]))
 
-with tab_blunders:
+elif active_section == "Blunder analysis":
     st.subheader("Blunder rate by game phase")
     phase_df = blunder_rate_by_phase(conn, username)
     if phase_df.empty:
@@ -147,12 +168,20 @@ with tab_blunders:
     if worst_df.empty:
         st.info("No games analyzed yet.")
     else:
-        st.dataframe(
-            worst_df[["played_at", "opponent_username", "result", "total_cp_loss", "blunders", "url"]],
-            width="stretch", hide_index=True,
-        )
+        header = st.columns([1.2, 1.5, 0.8, 1, 0.8, 0.6])
+        for col, title in zip(header, ["Date", "Opponent", "Result", "CP lost", "Blunders", ""]):
+            col.markdown(f"**{title}**")
+        for _, row in worst_df.iterrows():
+            c = st.columns([1.2, 1.5, 0.8, 1, 0.8, 0.6])
+            c[0].write(row["played_at"])
+            c[1].write(row["opponent_username"])
+            c[2].write(row["result"])
+            c[3].write(int(row["total_cp_loss"]))
+            c[4].write(int(row["blunders"]))
+            if c[5].button("→", key=f"jump_worstgame_{row['game_id']}"):
+                jump_to_game(int(row["game_id"]))
 
-with tab_accuracy:
+elif active_section == "Accuracy score":
     st.subheader("Accuracy per game")
     acc_df = per_game_accuracy(conn, username)
     if acc_df.empty:
@@ -165,25 +194,48 @@ with tab_accuracy:
 
         avg_acc = round(acc_df["accuracy"].mean(), 1)
         st.metric("Average accuracy", f"{avg_acc}%")
-        st.dataframe(
-            acc_df[["played_at", "opponent_username", "result", "time_class", "acpl", "accuracy", "url"]],
-            width="stretch", hide_index=True,
-        )
 
-with tab_worst_moves:
+        header = st.columns([1.2, 1.5, 0.8, 0.9, 0.8, 0.8, 0.6])
+        for col, title in zip(header, ["Date", "Opponent", "Result", "Time class", "ACPL", "Accuracy", ""]):
+            col.markdown(f"**{title}**")
+        for _, row in acc_df.iterrows():
+            c = st.columns([1.2, 1.5, 0.8, 0.9, 0.8, 0.8, 0.6])
+            c[0].write(row["played_at"].date() if pd.notna(row["played_at"]) else "?")
+            c[1].write(row["opponent_username"])
+            c[2].write(row["result"])
+            c[3].write(row["time_class"])
+            c[4].write(row["acpl"])
+            c[5].write(f"{row['accuracy']}%")
+            if c[6].button("→", key=f"jump_acc_{row['game_id']}"):
+                jump_to_game(int(row["game_id"]))
+
+elif active_section == "Worst moves":
     st.subheader("Your worst individual moves")
-    st.caption("Concrete, reviewable mistakes — click through to the game and jump to the move number.")
+    st.caption("Concrete, reviewable mistakes — hit → to open the game at that exact move.")
     worst_moves_df = worst_moves(conn, username, n=25)
     if worst_moves_df.empty:
         st.info("No move data yet.")
     else:
-        st.dataframe(
-            worst_moves_df[["played_at", "opponent_username", "result", "move_number", "color",
-                             "san", "cp_loss", "phase", "clock_seconds", "url"]],
-            width="stretch", hide_index=True,
-        )
+        widths = [1.2, 1.4, 0.8, 0.9, 0.7, 0.8, 0.8, 1, 0.9, 0.6]
+        header = st.columns(widths)
+        for col, title in zip(header, ["Date", "Opponent", "Result", "Move #", "Color", "Move",
+                                        "CP lost", "Phase", "Clock", ""]):
+            col.markdown(f"**{title}**")
+        for _, row in worst_moves_df.iterrows():
+            c = st.columns(widths)
+            c[0].write(row["played_at"])
+            c[1].write(row["opponent_username"])
+            c[2].write(row["result"])
+            c[3].write(int(row["move_number"]))
+            c[4].write(row["color"])
+            c[5].write(row["san"])
+            c[6].write(int(row["cp_loss"]))
+            c[7].write(row["phase"])
+            c[8].write(row["clock_seconds"])
+            if c[9].button("→", key=f"jump_wmove_{row['game_id']}_{row['ply']}"):
+                jump_to_game(int(row["game_id"]), int(row["ply"]))
 
-with tab_win_loss:
+elif active_section == "Win/Loss patterns":
     st.subheader("Win rate by color")
     color_df = win_rate_by_color(conn, username)
     if color_df.empty:
@@ -217,7 +269,7 @@ with tab_win_loss:
         st.plotly_chart(fig, width="stretch")
         st.dataframe(strength_df, width="stretch", hide_index=True)
 
-with tab_openings:
+elif active_section == "Openings":
     st.subheader("Opening repertoire, by family")
     family_df = opening_family_stats(conn, username, min_games=2)
     variations_df = opening_stats(conn, username, min_games=1)
@@ -243,7 +295,7 @@ with tab_openings:
                     width="stretch", hide_index=True,
                 )
 
-with tab_time:
+elif active_section == "Time management":
     st.subheader("Average time spent per move, by game phase")
     time_df = time_by_phase(conn, username)
     if time_df.empty:
@@ -255,7 +307,7 @@ with tab_time:
         st.plotly_chart(fig, width="stretch")
         st.dataframe(time_df, width="stretch", hide_index=True)
 
-with tab_game_detail:
+elif active_section == "Game detail":
     st.subheader("Per-game review")
     st.caption("The eval curve and full move list for one game, so you can see exactly where it turned.")
     games_df = games_for_selector(conn, username)
@@ -267,8 +319,17 @@ with tab_game_detail:
             return f"{date} vs {row['opponent_username']} ({row['result']}, {row['color']}, {row['time_class']})"
 
         labels = games_df.apply(_label, axis=1)
-        choice = st.selectbox("Pick a game", options=labels.index, format_func=lambda i: labels[i])
+        jump_game_id = st.session_state.get("jump_game_id")
+        default_index = 0
+        if jump_game_id is not None:
+            matches = games_df.index[games_df["id"] == jump_game_id]
+            if len(matches):
+                default_index = int(matches[0])
+
+        choice = st.selectbox("Pick a game", options=labels.index, index=default_index,
+                               format_func=lambda i: labels[i])
         game_id = int(games_df.loc[choice, "id"])
+        jump_ply = st.session_state.get("jump_ply") if game_id == jump_game_id else None
 
         summary = game_summary(conn, game_id)
         cols = st.columns(4)
@@ -283,6 +344,13 @@ with tab_game_detail:
         if moves_df.empty:
             st.info("No move data for this game.")
         else:
+            if jump_ply is not None:
+                jumped = moves_df[moves_df["ply"] == jump_ply]
+                if not jumped.empty:
+                    m = jumped.iloc[0]
+                    st.info(f"Jumped to move {m['move_number']} ({m['color']}): "
+                            f"**{m['san']}** — {m['cp_loss']} cp lost")
+
             fig = px.line(moves_df, x="ply", y="eval_white_pov", markers=True,
                           labels={"ply": "Ply", "eval_white_pov": "Eval (White POV, cp)"})
             fig.add_hline(y=0, line_dash="dot", line_color="gray")
@@ -290,10 +358,16 @@ with tab_game_detail:
             if not blunder_rows.empty:
                 fig.add_scatter(x=blunder_rows["ply"], y=blunder_rows["eval_white_pov"], mode="markers",
                                 marker=dict(color="red", size=12, symbol="x"), name="Blunder")
+            if jump_ply is not None:
+                fig.add_vline(x=jump_ply, line_dash="dash", line_color="blue")
             st.plotly_chart(fig, width="stretch")
 
-            st.dataframe(
-                moves_df[["move_number", "color", "san", "flag", "cp_loss", "classification",
-                          "phase", "clock_seconds"]],
-                width="stretch", hide_index=True,
-            )
+            display_cols = ["ply", "move_number", "color", "san", "flag", "cp_loss",
+                             "classification", "phase", "clock_seconds"]
+            styler = moves_df[display_cols].style
+            if jump_ply is not None:
+                styler = styler.apply(
+                    lambda r: ["background-color: #fff3b0" if r["ply"] == jump_ply else ""
+                               for _ in r], axis=1,
+                )
+            st.dataframe(styler, width="stretch", hide_index=True)
