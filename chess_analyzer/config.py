@@ -8,6 +8,14 @@ STOCKFISH_PATH = os.environ.get("STOCKFISH_PATH", "stockfish")
 # a personal tool; raise it if you don't mind analysis taking longer.
 ENGINE_DEPTH = int(os.environ.get("CHESS_ANALYZER_DEPTH", "12"))
 
+# Number of CPU threads Stockfish searches with. Defaults to all available
+# cores (Stockfish itself defaults to 1, which wastes multi-core machines).
+ENGINE_THREADS = int(os.environ.get("CHESS_ANALYZER_THREADS", str(os.cpu_count() or 1)))
+
+# Hash table size in MB. Stockfish's own default (16) is small for
+# multi-threaded search; a bit more room reduces repeated work.
+ENGINE_HASH_MB = int(os.environ.get("CHESS_ANALYZER_HASH_MB", "128"))
+
 # Centipawn-loss thresholds used to classify a move.
 INACCURACY_CP = 50
 MISTAKE_CP = 100

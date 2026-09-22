@@ -16,6 +16,8 @@ import chess.pgn
 from chess_analyzer.config import (
     BLUNDER_CP,
     ENGINE_DEPTH,
+    ENGINE_HASH_MB,
+    ENGINE_THREADS,
     INACCURACY_CP,
     MISTAKE_CP,
     STOCKFISH_PATH,
@@ -120,6 +122,8 @@ def analyze_pending_games(
     stockfish_path: str = STOCKFISH_PATH,
     depth: int = ENGINE_DEPTH,
     limit_games: Optional[int] = None,
+    threads: int = ENGINE_THREADS,
+    hash_mb: int = ENGINE_HASH_MB,
 ) -> int:
     """Analyze every game with analyzed=0. Returns the number of games analyzed."""
     own_conn = conn is None
@@ -134,6 +138,7 @@ def analyze_pending_games(
             return 0
 
         engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
+        engine.configure({"Threads": threads, "Hash": hash_mb})
         try:
             for row in games:
                 move_rows = analyze_game(engine, row["pgn"], depth=depth)
