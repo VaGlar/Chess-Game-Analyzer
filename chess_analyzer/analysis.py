@@ -7,7 +7,7 @@ classification (blunder/mistake/inaccuracy/ok), game phase and clock time.
 import io
 import re
 import sqlite3
-from typing import Optional
+from typing import Callable, Optional
 
 import chess
 import chess.engine
@@ -124,8 +124,14 @@ def analyze_pending_games(
     limit_games: Optional[int] = None,
     threads: int = ENGINE_THREADS,
     hash_mb: int = ENGINE_HASH_MB,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> int:
-    """Analyze every game with analyzed=0. Returns the number of games analyzed."""
+    """Analyze every game with analyzed=0. Returns the number of games analyzed.
+
+    If given, progress_callback(games_done, games_total) is called after
+    each game is committed, so a caller (e.g. the dashboard) can show live
+    progress through a long run.
+    """
     own_conn = conn is None
     conn = conn or init_db()
     count = 0
@@ -136,6 +142,7 @@ def analyze_pending_games(
         games = conn.execute(query).fetchall()
         if not games:
             return 0
+        total = len(games)
 
         engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
         engine.configure({"Threads": threads, "Hash": hash_mb})
@@ -161,6 +168,8 @@ def analyze_pending_games(
                 conn.execute("UPDATE games SET analyzed = 1 WHERE id = ?", (row["id"],))
                 conn.commit()
                 count += 1
+                if progress_callback:
+                    progress_callback(count, total)
         finally:
             engine.quit()
     finally:

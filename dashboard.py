@@ -2,6 +2,8 @@
 
 Run with: streamlit run dashboard.py
 """
+import time
+
 import pandas as pd
 import plotly.express as px
 import streamlit as st
@@ -44,13 +46,31 @@ with st.sidebar.expander("Fetch new games"):
 with st.sidebar.expander("Run Stockfish analysis"):
     stockfish_path = st.text_input("Stockfish binary path", value=STOCKFISH_PATH)
     depth = st.number_input("Search depth", min_value=4, max_value=30, value=ENGINE_DEPTH)
-    if st.button("Analyze pending games"):
-        with st.spinner("Running Stockfish over unanalyzed games... this can take a while."):
-            try:
-                n = analyze_pending_games(conn=conn, stockfish_path=stockfish_path, depth=depth)
-                st.success(f"Analyzed {n} games.")
-            except FileNotFoundError:
-                st.error(f"Could not find Stockfish at '{stockfish_path}'.")
+    pending_count = conn.execute(
+        "SELECT COUNT(*) FROM games WHERE username = ? AND analyzed = 0", (username,)
+    ).fetchone()[0] if username else 0
+    if pending_count:
+        st.caption(f"{pending_count} games pending analysis.")
+
+    if st.button("Analyze pending games", disabled=pending_count == 0):
+        progress_bar = st.progress(0.0)
+        status = st.empty()
+        start_time = time.monotonic()
+
+        def _on_progress(done: int, total: int) -> None:
+            progress_bar.progress(done / total)
+            elapsed = time.monotonic() - start_time
+            rate = elapsed / done if done else 0
+            eta_s = int(rate * (total - done))
+            status.text(f"{done}/{total} games analyzed — ETA ~{eta_s // 60}m {eta_s % 60}s")
+
+        try:
+            n = analyze_pending_games(conn=conn, stockfish_path=stockfish_path, depth=depth,
+                                       progress_callback=_on_progress)
+            status.empty()
+            st.success(f"Analyzed {n} games.")
+        except FileNotFoundError:
+            st.error(f"Could not find Stockfish at '{stockfish_path}'.")
 
 if not username:
     st.info("Enter your chess.com username in the sidebar to get started.")
