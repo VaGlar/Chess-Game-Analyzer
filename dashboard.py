@@ -16,6 +16,14 @@ from chess_analyzer.modules.blunders import (
     blunder_rate_by_time_pressure,
     top_worst_games,
 )
+from chess_analyzer.modules.openings import opening_stats
+from chess_analyzer.modules.time_management import time_by_phase
+from chess_analyzer.modules.win_loss import (
+    win_rate_by_color,
+    win_rate_by_opponent_strength,
+    win_rate_by_time_class,
+)
+from chess_analyzer.modules.worst_moves import worst_moves
 
 st.set_page_config(page_title="Chess Game Analyzer", layout="wide")
 
@@ -54,11 +62,17 @@ analyzed_count = conn.execute(
 ).fetchone()[0]
 st.caption(f"{game_count} games stored, {analyzed_count} analyzed for **{username}**.")
 
-if analyzed_count == 0:
-    st.warning("No analyzed games yet. Fetch games and run Stockfish analysis from the sidebar.")
+if game_count == 0:
+    st.warning("No games stored yet. Fetch games from the sidebar.")
     st.stop()
 
-tab_blunders, tab_accuracy = st.tabs(["Blunder analysis", "Accuracy score"])
+(
+    tab_blunders, tab_accuracy, tab_worst_moves,
+    tab_win_loss, tab_openings, tab_time,
+) = st.tabs([
+    "Blunder analysis", "Accuracy score", "Worst moves",
+    "Win/Loss patterns", "Openings", "Time management",
+])
 
 with tab_blunders:
     st.subheader("Blunder rate by game phase")
@@ -109,3 +123,77 @@ with tab_accuracy:
             acc_df[["played_at", "opponent_username", "result", "time_class", "acpl", "accuracy", "url"]],
             use_container_width=True, hide_index=True,
         )
+
+with tab_worst_moves:
+    st.subheader("Your worst individual moves")
+    st.caption("Concrete, reviewable mistakes — click through to the game and jump to the move number.")
+    worst_moves_df = worst_moves(conn, username, n=25)
+    if worst_moves_df.empty:
+        st.info("No move data yet.")
+    else:
+        st.dataframe(
+            worst_moves_df[["played_at", "opponent_username", "result", "move_number", "color",
+                             "san", "cp_loss", "phase", "clock_seconds", "url"]],
+            use_container_width=True, hide_index=True,
+        )
+
+with tab_win_loss:
+    st.subheader("Win rate by color")
+    color_df = win_rate_by_color(conn, username)
+    if color_df.empty:
+        st.info("No games yet.")
+    else:
+        fig = px.bar(color_df, x="color", y="win_rate", text="win_rate",
+                     labels={"color": "Color", "win_rate": "Win rate (%)"})
+        fig.update_traces(texttemplate="%{text}%", textposition="outside")
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(color_df, use_container_width=True, hide_index=True)
+
+    st.subheader("Win rate by time control")
+    tc_df = win_rate_by_time_class(conn, username)
+    if tc_df.empty:
+        st.info("No games yet.")
+    else:
+        fig = px.bar(tc_df, x="time_class", y="win_rate", text="win_rate",
+                     labels={"time_class": "Time control", "win_rate": "Win rate (%)"})
+        fig.update_traces(texttemplate="%{text}%", textposition="outside")
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(tc_df, use_container_width=True, hide_index=True)
+
+    st.subheader("Win rate by opponent strength")
+    strength_df = win_rate_by_opponent_strength(conn, username)
+    if strength_df.empty:
+        st.info("No rated games yet.")
+    else:
+        fig = px.bar(strength_df, x="bucket", y="win_rate", text="win_rate",
+                     labels={"bucket": "Opponent vs. your rating", "win_rate": "Win rate (%)"})
+        fig.update_traces(texttemplate="%{text}%", textposition="outside")
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(strength_df, use_container_width=True, hide_index=True)
+
+with tab_openings:
+    st.subheader("Opening repertoire")
+    openings_df = opening_stats(conn, username, min_games=2)
+    if openings_df.empty:
+        st.info("No openings played at least twice yet.")
+    else:
+        top_openings = openings_df.head(15)
+        fig = px.bar(top_openings, x="opening_name", y="win_rate", text="win_rate",
+                     hover_data=["games"],
+                     labels={"opening_name": "Opening", "win_rate": "Win rate (%)"})
+        fig.update_traces(texttemplate="%{text}%", textposition="outside")
+        fig.update_xaxes(tickangle=-30)
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(openings_df, use_container_width=True, hide_index=True)
+
+with tab_time:
+    st.subheader("Average time spent per move, by game phase")
+    time_df = time_by_phase(conn, username)
+    if time_df.empty:
+        st.info("No clock data in analyzed games with a live (non-daily) time control.")
+    else:
+        fig = px.bar(time_df, x="phase", y="avg_seconds_per_move", text="avg_seconds_per_move",
+                     labels={"phase": "Phase", "avg_seconds_per_move": "Avg seconds/move"})
+        fig.update_traces(texttemplate="%{text}s", textposition="outside")
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(time_df, use_container_width=True, hide_index=True)

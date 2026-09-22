@@ -19,6 +19,20 @@ def _pgn_headers(pgn: str) -> dict:
     return {m.group(1): m.group(2) for m in _PGN_HEADER_RE.finditer(pgn)}
 
 
+def _clean_opening_name(headers: dict) -> Optional[str]:
+    """Turn a chess.com ECOUrl into a readable opening name, e.g.
+    'https://www.chess.com/openings/Italian-Game-Giuoco-Piano' ->
+    'Italian Game Giuoco Piano'. Falls back to a plain Opening/ECO header.
+    """
+    eco_url = headers.get("ECOUrl")
+    if eco_url:
+        slug = eco_url.rstrip("/").rsplit("/", 1)[-1]
+        name = slug.replace("-", " ").strip()
+        if name:
+            return name
+    return headers.get("Opening") or headers.get("ECO") or None
+
+
 def _get(url: str) -> dict:
     resp = requests.get(url, headers=HEADERS, timeout=30)
     resp.raise_for_status()
@@ -108,7 +122,7 @@ def inserted_row(conn: sqlite3.Connection, username: str, game: dict) -> bool:
                 opp.get("rating"),
                 opp.get("username"),
                 headers.get("ECO"),
-                headers.get("ECOUrl") or headers.get("Opening"),
+                _clean_opening_name(headers),
                 pgn,
                 game.get("url"),
             ),
@@ -116,6 +130,22 @@ def inserted_row(conn: sqlite3.Connection, username: str, game: dict) -> bool:
         return True
     except sqlite3.IntegrityError:
         return False
+
+
+def backfill_opening_names(conn: sqlite3.Connection) -> int:
+    """Recompute opening_name for already-stored games from their saved PGN.
+
+    Useful after improving _clean_opening_name(): no API calls needed since
+    the raw PGN is already in the DB.
+    """
+    rows = conn.execute("SELECT id, pgn FROM games").fetchall()
+    updated = 0
+    for row in rows:
+        name = _clean_opening_name(_pgn_headers(row["pgn"]))
+        conn.execute("UPDATE games SET opening_name = ? WHERE id = ?", (name, row["id"]))
+        updated += 1
+    conn.commit()
+    return updated
 
 
 if __name__ == "__main__":
