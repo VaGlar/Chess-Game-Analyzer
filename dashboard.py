@@ -2,8 +2,6 @@
 
 Run with: streamlit run dashboard.py
 """
-import datetime
-
 import pandas as pd
 import plotly.express as px
 import streamlit as st
@@ -58,11 +56,14 @@ with st.sidebar.expander("Run Stockfish analysis", expanded=True):
         st_autorefresh(interval=3000, key="analysis_autorefresh")
         done, total = status_row["done"], status_row["total"]
         st.progress(done / total if total else 0.0)
-        if status_row["started_at"] and done:
-            started = datetime.datetime.fromisoformat(status_row["started_at"])
-            elapsed = (datetime.datetime.utcnow() - started).total_seconds()
-            eta_s = int(elapsed / done * (total - done))
-            st.caption(f"{done}/{total} games analyzed — ETA ~{eta_s // 60}m {eta_s % 60}s")
+        if status_row["ema_seconds"] is not None:
+            remaining = total - done
+            eta_s = int(status_row["ema_seconds"] * remaining)
+            per_game = status_row["ema_seconds"]
+            st.caption(
+                f"{done}/{total} games analyzed — ETA ~{eta_s // 60}m {eta_s % 60}s "
+                f"(recent pace: ~{per_game:.0f}s/game)"
+            )
         else:
             st.caption(f"{done}/{total} games analyzed — starting...")
         if st.button("Stop analysis"):
