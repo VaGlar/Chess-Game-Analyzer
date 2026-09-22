@@ -6,6 +6,12 @@ primary_region = "ams"
 
 [build]
 
+[env]
+  # 1GB RAM total for the whole VM (Python + Streamlit + pandas/plotly +
+  # Stockfish). The 128MB default hash table is fine on a Codespace but
+  # risks OOM-killing the process here mid-analysis; keep it small.
+  CHESS_ANALYZER_HASH_MB = "32"
+
 [http_service]
   internal_port = 8501
   force_https = true
