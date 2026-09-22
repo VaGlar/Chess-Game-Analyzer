@@ -1,0 +1,23 @@
+# Fly.io app config. Uses the existing Dockerfile — no separate build setup.
+# `app` below is a placeholder; `fly launch` will ask you to pick a unique
+# name (or edit it here) the first time you set this up.
+app = "chess-game-analyzer"
+primary_region = "ams"
+
+[build]
+
+[http_service]
+  internal_port = 8501
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+
+[mounts]
+  source = "chess_data"
+  destination = "/app/data"
+
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1

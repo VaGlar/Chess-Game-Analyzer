@@ -53,6 +53,38 @@ docker compose run --rm dashboard python cli.py fetch <chess.com-username> [--ye
 docker compose run --rm dashboard python cli.py analyze [--depth 12]
 ```
 
+## Run it on Fly.io — permanent URL, auto-deployed from GitHub
+
+`fly.toml` and `.github/workflows/fly-deploy.yml` are already set up: every
+push to `main` builds the existing Dockerfile and deploys it to Fly, using a
+`FLY_API_TOKEN` GitHub Actions secret. Nothing ever gets typed into a chat
+or seen by anyone but you — GitHub's Actions runner reads the secret, Fly
+never sees this repo directly.
+
+Fly.io isn't free (needs a card on file), and the app gets a public URL
+by default — anyone with the link can see your dashboard.
+
+**One-time setup** (run this inside a GitHub Codespace on this repo, not on
+your own machine — see above for how to open one):
+
+```bash
+curl -L https://fly.io/install.sh | sh
+export FLYCTL_INSTALL="$HOME/.fly"
+export PATH="$FLYCTL_INSTALL/bin:$PATH"
+
+fly auth login                    # opens a browser login flow
+fly launch --no-deploy            # reads fly.toml/Dockerfile; pick a unique app name if asked
+fly volumes create chess_data --size 1 --region ams
+fly tokens create deploy -x 999999h   # prints a token — copy it
+```
+
+Then, in the GitHub repo (not here): **Settings → Secrets and variables →
+Actions → New repository secret**, name it `FLY_API_TOKEN`, paste the token
+from the last command. From then on every push to `main` deploys
+automatically (or trigger one manually from the Actions tab — the workflow
+also has `workflow_dispatch`). The Codespace used for setup can be deleted
+afterwards; it's not needed for ongoing deploys.
+
 ## Config
 
 Environment variables (all optional, already set correctly inside the
