@@ -89,6 +89,27 @@ def test_analyze_pending_games_marks_analyzed_and_commits(engine):
     conn.close()
 
 
+def test_analyze_pending_games_restarts_engine_without_losing_data(engine):
+    """restart_every=1 forces a fresh Stockfish process before every single
+    game (the extreme case) — results must come out identical to a normal
+    run, since the swap is meant to be invisible to callers.
+    """
+    conn = init_db(":memory:")
+    for i in range(3):
+        _seed_blunder_game(conn, f"restart{i}")
+    conn.commit()
+
+    calls = []
+    n = analyze_pending_games(conn=conn, stockfish_path=STOCKFISH_PATH, depth=8,
+                               restart_every=1, progress_callback=lambda d, t: calls.append((d, t)))
+    assert n == 3
+    assert calls == [(1, 3), (2, 3), (3, 3)]
+    assert conn.execute("SELECT COUNT(*) FROM moves").fetchone()[0] == 30
+    blunders = conn.execute("SELECT COUNT(*) FROM moves WHERE classification='blunder'").fetchone()[0]
+    assert blunders == 3
+    conn.close()
+
+
 def test_analyze_pending_games_progress_callback_fires_per_game(engine):
     conn = init_db(":memory:")
     _seed_blunder_game(conn, "prog0")
