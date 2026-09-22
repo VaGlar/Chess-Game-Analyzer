@@ -2,8 +2,8 @@
 
 Chess Game Analyzer — fetches your chess.com game history and analyzes it
 move-by-move with Stockfish, surfacing patterns in blunders, accuracy,
-openings, time management, and win/loss trends. Local-first, built with
-Python and Streamlit.
+openings, time management, and win/loss trends. Local-first, containerized,
+built with Python and Streamlit.
 
 ## MVP scope (v1)
 
@@ -20,42 +20,38 @@ Opening repertoire, time management, and win/loss pattern modules read from
 the same `games`/`moves` tables and can be added later without touching the
 fetch or analysis code.
 
-## Setup
+## Run it
+
+Requires only Docker — no Python, pip, or Stockfish install on your machine.
+The image bundles Python, all dependencies, and the Stockfish binary.
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+docker compose up --build
 ```
 
-Install Stockfish locally (e.g. `apt install stockfish`, `brew install
-stockfish`, or download a binary) and note its path.
+Then open http://localhost:8501. Use the sidebar to fetch your chess.com
+games and run Stockfish analysis; both tabs (blunders, accuracy) update from
+there.
 
-## Usage
+Data is stored in a named Docker volume (`chess_data`), so it survives
+container restarts and rebuilds. To reset it: `docker compose down -v`.
 
-Fetch and analyze via the CLI:
+### CLI, without the dashboard
+
+The same image can run the fetch/analyze CLI directly:
 
 ```bash
-python cli.py fetch <chess.com-username> [--year 2024] [--month 3]
-python cli.py analyze --stockfish-path /usr/games/stockfish [--depth 12]
+docker compose run --rm dashboard python cli.py fetch <chess.com-username> [--year 2024] [--month 3]
+docker compose run --rm dashboard python cli.py analyze [--depth 12]
 ```
-
-Or launch the dashboard, which can also trigger fetch/analyze from the
-sidebar:
-
-```bash
-streamlit run dashboard.py
-```
-
-Data is stored in `data/chess_analyzer.db` (SQLite, gitignored). Everything
-runs locally — no auth, no cloud.
 
 ## Config
 
-Environment variables (all optional):
+Environment variables (all optional, already set correctly inside the
+container by the Dockerfile):
 
 - `CHESS_ANALYZER_DB` — path to the SQLite database (default
-  `data/chess_analyzer.db`)
-- `STOCKFISH_PATH` — path to the Stockfish binary (default `stockfish`, i.e.
-  whatever's on `PATH`)
+  `/app/data/chess_analyzer.db` in the container)
+- `STOCKFISH_PATH` — path to the Stockfish binary (default
+  `/usr/games/stockfish` in the container)
 - `CHESS_ANALYZER_DEPTH` — Stockfish search depth per position (default `12`)
