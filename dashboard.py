@@ -9,7 +9,7 @@ import plotly.express as px
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
-from chess_analyzer.background import start_background_analysis
+from chess_analyzer.background import reconcile_stale_status, start_background_analysis
 from chess_analyzer.config import DB_PATH, ENGINE_DEPTH, STOCKFISH_PATH
 from chess_analyzer.db import get_analysis_status, init_db, request_cancel
 from chess_analyzer.fetch import fetch_games
@@ -50,6 +50,8 @@ with st.sidebar.expander("Run Stockfish analysis", expanded=True):
     stockfish_path = st.text_input("Stockfish binary path", value=STOCKFISH_PATH)
     depth = st.number_input("Search depth", min_value=4, max_value=30, value=ENGINE_DEPTH)
 
+    if reconcile_stale_status(conn):
+        st.rerun()
     status_row = get_analysis_status(conn)
 
     if status_row["running"]:
