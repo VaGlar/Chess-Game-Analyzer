@@ -19,7 +19,9 @@ from chess_analyzer.modules.blunders import (
     blunder_rate_by_time_pressure,
     top_worst_games,
 )
-from chess_analyzer.modules.openings import opening_stats
+from chess_analyzer.modules.game_detail import game_moves, game_summary, games_for_selector
+from chess_analyzer.modules.openings import opening_family_stats, opening_stats
+from chess_analyzer.modules.rating import rating_progression
 from chess_analyzer.modules.time_management import time_by_phase
 from chess_analyzer.modules.win_loss import (
     win_rate_by_color,
@@ -95,12 +97,28 @@ if game_count == 0:
     st.stop()
 
 (
-    tab_blunders, tab_accuracy, tab_worst_moves,
-    tab_win_loss, tab_openings, tab_time,
+    tab_rating, tab_blunders, tab_accuracy, tab_worst_moves,
+    tab_win_loss, tab_openings, tab_time, tab_game_detail,
 ) = st.tabs([
-    "Blunder analysis", "Accuracy score", "Worst moves",
-    "Win/Loss patterns", "Openings", "Time management",
+    "Rating", "Blunder analysis", "Accuracy score", "Worst moves",
+    "Win/Loss patterns", "Openings", "Time management", "Game detail",
 ])
+
+with tab_rating:
+    st.subheader("Rating over time")
+    rating_df = rating_progression(conn, username)
+    if rating_df.empty:
+        st.info("No rated games yet.")
+    else:
+        fig = px.line(rating_df, x="played_at", y="my_rating", color="time_class",
+                       markers=True, labels={"played_at": "Date", "my_rating": "Rating",
+                                              "time_class": "Time control"})
+        st.plotly_chart(fig, width="stretch")
+
+        latest = rating_df.sort_values("played_at").groupby("time_class").tail(1)
+        cols = st.columns(len(latest)) if len(latest) else [st]
+        for col, (_, row) in zip(cols, latest.iterrows()):
+            col.metric(f"Current {row['time_class']}", int(row["my_rating"]))
 
 with tab_blunders:
     st.subheader("Blunder rate by game phase")
@@ -200,19 +218,30 @@ with tab_win_loss:
         st.dataframe(strength_df, width="stretch", hide_index=True)
 
 with tab_openings:
-    st.subheader("Opening repertoire")
-    openings_df = opening_stats(conn, username, min_games=2)
-    if openings_df.empty:
+    st.subheader("Opening repertoire, by family")
+    family_df = opening_family_stats(conn, username, min_games=2)
+    variations_df = opening_stats(conn, username, min_games=1)
+    if family_df.empty:
         st.info("No openings played at least twice yet.")
     else:
-        top_openings = openings_df.head(15)
-        fig = px.bar(top_openings, x="opening_name", y="win_rate", text="win_rate",
+        top_families = family_df.head(15)
+        fig = px.bar(top_families, x="family", y="win_rate", text="win_rate",
                      hover_data=["games"],
-                     labels={"opening_name": "Opening", "win_rate": "Win rate (%)"})
+                     labels={"family": "Opening family", "win_rate": "Win rate (%)"})
         fig.update_traces(texttemplate="%{text}%", textposition="outside")
         fig.update_xaxes(tickangle=-30)
         st.plotly_chart(fig, width="stretch")
-        st.dataframe(openings_df, width="stretch", hide_index=True)
+
+        for _, fam_row in family_df.iterrows():
+            variations = variations_df[variations_df["family"] == fam_row["family"]]
+            with st.expander(
+                f"{fam_row['family']} — {fam_row['games']} games, {fam_row['win_rate']}% win rate"
+            ):
+                st.dataframe(
+                    variations[["opening_name", "opening_eco", "games", "wins", "draws",
+                                "losses", "win_rate"]],
+                    width="stretch", hide_index=True,
+                )
 
 with tab_time:
     st.subheader("Average time spent per move, by game phase")
@@ -225,3 +254,46 @@ with tab_time:
         fig.update_traces(texttemplate="%{text}s", textposition="outside")
         st.plotly_chart(fig, width="stretch")
         st.dataframe(time_df, width="stretch", hide_index=True)
+
+with tab_game_detail:
+    st.subheader("Per-game review")
+    st.caption("The eval curve and full move list for one game, so you can see exactly where it turned.")
+    games_df = games_for_selector(conn, username)
+    if games_df.empty:
+        st.info("No analyzed games yet.")
+    else:
+        def _label(row):
+            date = row["played_at"] or "?"
+            return f"{date} vs {row['opponent_username']} ({row['result']}, {row['color']}, {row['time_class']})"
+
+        labels = games_df.apply(_label, axis=1)
+        choice = st.selectbox("Pick a game", options=labels.index, format_func=lambda i: labels[i])
+        game_id = int(games_df.loc[choice, "id"])
+
+        summary = game_summary(conn, game_id)
+        cols = st.columns(4)
+        cols[0].metric("Result", summary.get("result", "?"))
+        cols[1].metric("Color", summary.get("color", "?"))
+        cols[2].metric("Opponent", f"{summary.get('opponent_username', '?')} ({summary.get('opponent_rating', '?')})")
+        cols[3].metric("Opening", summary.get("opening_name") or "?")
+        if summary.get("url"):
+            st.markdown(f"[Open on chess.com]({summary['url']})")
+
+        moves_df = game_moves(conn, game_id)
+        if moves_df.empty:
+            st.info("No move data for this game.")
+        else:
+            fig = px.line(moves_df, x="ply", y="eval_white_pov", markers=True,
+                          labels={"ply": "Ply", "eval_white_pov": "Eval (White POV, cp)"})
+            fig.add_hline(y=0, line_dash="dot", line_color="gray")
+            blunder_rows = moves_df[moves_df["classification"] == "blunder"]
+            if not blunder_rows.empty:
+                fig.add_scatter(x=blunder_rows["ply"], y=blunder_rows["eval_white_pov"], mode="markers",
+                                marker=dict(color="red", size=12, symbol="x"), name="Blunder")
+            st.plotly_chart(fig, width="stretch")
+
+            st.dataframe(
+                moves_df[["move_number", "color", "san", "flag", "cp_loss", "classification",
+                          "phase", "clock_seconds"]],
+                width="stretch", hide_index=True,
+            )
