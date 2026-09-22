@@ -2,15 +2,16 @@
 
 Run with: streamlit run dashboard.py
 """
-import time
+import datetime
 
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 
-from chess_analyzer.analysis import analyze_pending_games
+from chess_analyzer.background import start_background_analysis
 from chess_analyzer.config import DB_PATH, ENGINE_DEPTH, STOCKFISH_PATH
-from chess_analyzer.db import init_db
+from chess_analyzer.db import get_analysis_status, init_db, request_cancel
 from chess_analyzer.fetch import fetch_games
 from chess_analyzer.modules.accuracy import accuracy_trend, per_game_accuracy
 from chess_analyzer.modules.blunders import (
@@ -43,34 +44,41 @@ with st.sidebar.expander("Fetch new games"):
             n = fetch_games(username, year or None, month or None, conn=conn)
         st.success(f"Inserted {n} new games.")
 
-with st.sidebar.expander("Run Stockfish analysis"):
+with st.sidebar.expander("Run Stockfish analysis", expanded=True):
     stockfish_path = st.text_input("Stockfish binary path", value=STOCKFISH_PATH)
     depth = st.number_input("Search depth", min_value=4, max_value=30, value=ENGINE_DEPTH)
-    pending_count = conn.execute(
-        "SELECT COUNT(*) FROM games WHERE username = ? AND analyzed = 0", (username,)
-    ).fetchone()[0] if username else 0
-    if pending_count:
-        st.caption(f"{pending_count} games pending analysis.")
 
-    if st.button("Analyze pending games", disabled=pending_count == 0):
-        progress_bar = st.progress(0.0)
-        status = st.empty()
-        start_time = time.monotonic()
+    status_row = get_analysis_status(conn)
 
-        def _on_progress(done: int, total: int) -> None:
-            progress_bar.progress(done / total)
-            elapsed = time.monotonic() - start_time
-            rate = elapsed / done if done else 0
-            eta_s = int(rate * (total - done))
-            status.text(f"{done}/{total} games analyzed — ETA ~{eta_s // 60}m {eta_s % 60}s")
+    if status_row["running"]:
+        st_autorefresh(interval=3000, key="analysis_autorefresh")
+        done, total = status_row["done"], status_row["total"]
+        st.progress(done / total if total else 0.0)
+        if status_row["started_at"] and done:
+            started = datetime.datetime.fromisoformat(status_row["started_at"])
+            elapsed = (datetime.datetime.utcnow() - started).total_seconds()
+            eta_s = int(elapsed / done * (total - done))
+            st.caption(f"{done}/{total} games analyzed — ETA ~{eta_s // 60}m {eta_s % 60}s")
+        else:
+            st.caption(f"{done}/{total} games analyzed — starting...")
+        if st.button("Stop analysis"):
+            request_cancel(conn)
+            st.info("Stopping after the current game finishes...")
+    else:
+        if status_row["error"]:
+            st.error(f"Last analysis run failed: {status_row['error']}")
 
-        try:
-            n = analyze_pending_games(conn=conn, stockfish_path=stockfish_path, depth=depth,
-                                       progress_callback=_on_progress)
-            status.empty()
-            st.success(f"Analyzed {n} games.")
-        except FileNotFoundError:
-            st.error(f"Could not find Stockfish at '{stockfish_path}'.")
+        pending_count = conn.execute(
+            "SELECT COUNT(*) FROM games WHERE username = ? AND analyzed = 0", (username,)
+        ).fetchone()[0] if username else 0
+        if pending_count:
+            st.caption(f"{pending_count} games pending analysis.")
+
+        if st.button("Analyze pending games", disabled=pending_count == 0):
+            if start_background_analysis(stockfish_path=stockfish_path, depth=depth):
+                st.rerun()
+            else:
+                st.warning("Could not start (already running, or nothing pending).")
 
 if not username:
     st.info("Enter your chess.com username in the sidebar to get started.")
@@ -103,8 +111,8 @@ with tab_blunders:
         fig = px.bar(phase_df, x="phase", y="blunder_rate", text="blunder_rate",
                      labels={"phase": "Phase", "blunder_rate": "Blunder rate (%)"})
         fig.update_traces(texttemplate="%{text}%", textposition="outside")
-        st.plotly_chart(fig, use_container_width=True)
-        st.dataframe(phase_df, use_container_width=True, hide_index=True)
+        st.plotly_chart(fig, width="stretch")
+        st.dataframe(phase_df, width="stretch", hide_index=True)
 
     st.subheader("Blunder rate vs. time pressure")
     tp_df = blunder_rate_by_time_pressure(conn, username)
@@ -114,7 +122,7 @@ with tab_blunders:
         fig = px.bar(tp_df, x="time_pressure", y="blunder_rate", text="blunder_rate",
                      labels={"time_pressure": "", "blunder_rate": "Blunder rate (%)"})
         fig.update_traces(texttemplate="%{text}%", textposition="outside")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     st.subheader("Top 5 worst games (by total centipawn loss)")
     worst_df = top_worst_games(conn, username, n=5)
@@ -123,7 +131,7 @@ with tab_blunders:
     else:
         st.dataframe(
             worst_df[["played_at", "opponent_username", "result", "total_cp_loss", "blunders", "url"]],
-            use_container_width=True, hide_index=True,
+            width="stretch", hide_index=True,
         )
 
 with tab_accuracy:
@@ -135,13 +143,13 @@ with tab_accuracy:
         trend_df = accuracy_trend(acc_df)
         fig = px.line(trend_df, x="played_at", y=["accuracy", "accuracy_rolling"],
                        labels={"played_at": "Date", "value": "Accuracy (%)", "variable": ""})
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
         avg_acc = round(acc_df["accuracy"].mean(), 1)
         st.metric("Average accuracy", f"{avg_acc}%")
         st.dataframe(
             acc_df[["played_at", "opponent_username", "result", "time_class", "acpl", "accuracy", "url"]],
-            use_container_width=True, hide_index=True,
+            width="stretch", hide_index=True,
         )
 
 with tab_worst_moves:
@@ -154,7 +162,7 @@ with tab_worst_moves:
         st.dataframe(
             worst_moves_df[["played_at", "opponent_username", "result", "move_number", "color",
                              "san", "cp_loss", "phase", "clock_seconds", "url"]],
-            use_container_width=True, hide_index=True,
+            width="stretch", hide_index=True,
         )
 
 with tab_win_loss:
@@ -166,8 +174,8 @@ with tab_win_loss:
         fig = px.bar(color_df, x="color", y="win_rate", text="win_rate",
                      labels={"color": "Color", "win_rate": "Win rate (%)"})
         fig.update_traces(texttemplate="%{text}%", textposition="outside")
-        st.plotly_chart(fig, use_container_width=True)
-        st.dataframe(color_df, use_container_width=True, hide_index=True)
+        st.plotly_chart(fig, width="stretch")
+        st.dataframe(color_df, width="stretch", hide_index=True)
 
     st.subheader("Win rate by time control")
     tc_df = win_rate_by_time_class(conn, username)
@@ -177,8 +185,8 @@ with tab_win_loss:
         fig = px.bar(tc_df, x="time_class", y="win_rate", text="win_rate",
                      labels={"time_class": "Time control", "win_rate": "Win rate (%)"})
         fig.update_traces(texttemplate="%{text}%", textposition="outside")
-        st.plotly_chart(fig, use_container_width=True)
-        st.dataframe(tc_df, use_container_width=True, hide_index=True)
+        st.plotly_chart(fig, width="stretch")
+        st.dataframe(tc_df, width="stretch", hide_index=True)
 
     st.subheader("Win rate by opponent strength")
     strength_df = win_rate_by_opponent_strength(conn, username)
@@ -188,8 +196,8 @@ with tab_win_loss:
         fig = px.bar(strength_df, x="bucket", y="win_rate", text="win_rate",
                      labels={"bucket": "Opponent vs. your rating", "win_rate": "Win rate (%)"})
         fig.update_traces(texttemplate="%{text}%", textposition="outside")
-        st.plotly_chart(fig, use_container_width=True)
-        st.dataframe(strength_df, use_container_width=True, hide_index=True)
+        st.plotly_chart(fig, width="stretch")
+        st.dataframe(strength_df, width="stretch", hide_index=True)
 
 with tab_openings:
     st.subheader("Opening repertoire")
@@ -203,8 +211,8 @@ with tab_openings:
                      labels={"opening_name": "Opening", "win_rate": "Win rate (%)"})
         fig.update_traces(texttemplate="%{text}%", textposition="outside")
         fig.update_xaxes(tickangle=-30)
-        st.plotly_chart(fig, use_container_width=True)
-        st.dataframe(openings_df, use_container_width=True, hide_index=True)
+        st.plotly_chart(fig, width="stretch")
+        st.dataframe(openings_df, width="stretch", hide_index=True)
 
 with tab_time:
     st.subheader("Average time spent per move, by game phase")
@@ -215,5 +223,5 @@ with tab_time:
         fig = px.bar(time_df, x="phase", y="avg_seconds_per_move", text="avg_seconds_per_move",
                      labels={"phase": "Phase", "avg_seconds_per_move": "Avg seconds/move"})
         fig.update_traces(texttemplate="%{text}s", textposition="outside")
-        st.plotly_chart(fig, use_container_width=True)
-        st.dataframe(time_df, use_container_width=True, hide_index=True)
+        st.plotly_chart(fig, width="stretch")
+        st.dataframe(time_df, width="stretch", hide_index=True)

@@ -125,12 +125,15 @@ def analyze_pending_games(
     threads: int = ENGINE_THREADS,
     hash_mb: int = ENGINE_HASH_MB,
     progress_callback: Optional[Callable[[int, int], None]] = None,
+    should_cancel: Optional[Callable[[], bool]] = None,
 ) -> int:
     """Analyze every game with analyzed=0. Returns the number of games analyzed.
 
     If given, progress_callback(games_done, games_total) is called after
     each game is committed, so a caller (e.g. the dashboard) can show live
-    progress through a long run.
+    progress through a long run. If given, should_cancel() is checked before
+    each game; returning True stops the run cleanly (already-committed
+    games are kept, nothing partial is written).
     """
     own_conn = conn is None
     conn = conn or init_db()
@@ -148,6 +151,8 @@ def analyze_pending_games(
         engine.configure({"Threads": threads, "Hash": hash_mb})
         try:
             for row in games:
+                if should_cancel and should_cancel():
+                    break
                 move_rows = analyze_game(engine, row["pgn"], depth=depth)
                 for mr in move_rows:
                     conn.execute(
