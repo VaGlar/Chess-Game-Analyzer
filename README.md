@@ -20,10 +20,18 @@ Opening repertoire, time management, and win/loss pattern modules read from
 the same `games`/`moves` tables and can be added later without touching the
 fetch or analysis code.
 
-## Run it
+## Run it — zero local install
 
-Requires only Docker — no Python, pip, or Stockfish install on your machine.
-The image bundles Python, all dependencies, and the Stockfish binary.
+Open this repo as a **GitHub Codespace** (button on the repo page: `Code` →
+`Codespaces` → `Create codespace on <branch>`). Nothing installs on your
+machine at all — the Dockerfile and `docker-compose.yml` build and run in a
+free cloud VM, and GitHub forwards the dashboard's port to a URL in your
+browser automatically. Stop the codespace when you're done and resume it
+later; the SQLite data survives as long as you don't delete the codespace.
+
+## Run it locally instead (needs Docker)
+
+If you'd rather run it on your own machine:
 
 ```bash
 docker compose up --build

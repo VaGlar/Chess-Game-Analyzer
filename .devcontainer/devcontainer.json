@@ -1,0 +1,13 @@
+{
+  "name": "Chess Game Analyzer",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "dashboard",
+  "workspaceFolder": "/app",
+  "forwardPorts": [8501],
+  "portsAttributes": {
+    "8501": {
+      "label": "Dashboard",
+      "onAutoForward": "openPreview"
+    }
+  }
+}
