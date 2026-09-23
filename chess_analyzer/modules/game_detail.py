@@ -32,8 +32,8 @@ def game_moves(conn: sqlite3.Connection, game_id: int) -> pd.DataFrame:
     better), plus a flag emoji for quick visual scanning.
     """
     query = """
-        SELECT ply, move_number, color, san, eval_cp_before, eval_cp_after,
-               cp_loss, classification, phase, clock_seconds
+        SELECT ply, move_number, color, san, uci, eval_cp_before, eval_cp_after,
+               cp_loss, classification, phase, clock_seconds, best_move_uci
         FROM moves WHERE game_id = ? ORDER BY ply
     """
     df = pd.read_sql_query(query, conn, params=(game_id,))

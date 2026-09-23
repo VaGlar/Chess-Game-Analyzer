@@ -120,3 +120,44 @@ def test_migration_adds_columns_to_pre_existing_db_without_losing_data(tmp_path)
     assert row["running"] == 1
     assert row["ema_seconds"] is None  # new column present, defaulted
     migrated.close()
+
+
+def test_migration_adds_best_move_uci_to_pre_existing_moves_table(tmp_path):
+    """moves shipped before best_move_uci existed (added for the board
+    view's "what should I have played" arrow). Same in-place migration
+    requirement as analysis_status above.
+    """
+    db_path = str(tmp_path / "old_moves.db")
+    raw = sqlite3.connect(db_path)
+    raw.execute("""
+        CREATE TABLE moves (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id INTEGER NOT NULL,
+            ply INTEGER NOT NULL,
+            move_number INTEGER NOT NULL,
+            color TEXT NOT NULL,
+            san TEXT NOT NULL,
+            uci TEXT NOT NULL,
+            eval_cp_before INTEGER,
+            eval_cp_after INTEGER,
+            cp_loss INTEGER,
+            is_best INTEGER NOT NULL DEFAULT 0,
+            classification TEXT NOT NULL DEFAULT 'ok',
+            phase TEXT NOT NULL,
+            clock_seconds INTEGER,
+            time_pressure INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(game_id, ply)
+        )
+    """)
+    raw.execute("""
+        INSERT INTO moves (game_id, ply, move_number, color, san, uci, phase)
+        VALUES (1, 1, 1, 'white', 'e4', 'e2e4', 'opening')
+    """)
+    raw.commit()
+    raw.close()
+
+    migrated = init_db(db_path)
+    row = migrated.execute("SELECT san, best_move_uci FROM moves WHERE id = 1").fetchone()
+    assert row["san"] == "e4"  # pre-existing data preserved
+    assert row["best_move_uci"] is None  # new column present, defaulted
+    migrated.close()

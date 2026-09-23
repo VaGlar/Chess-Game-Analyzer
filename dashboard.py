@@ -17,6 +17,7 @@ from chess_analyzer.modules.blunders import (
     blunder_rate_by_time_pressure,
     top_worst_games,
 )
+from chess_analyzer.modules.board_view import board_svg_at_ply, total_plies
 from chess_analyzer.modules.game_detail import game_moves, game_summary, games_for_selector
 from chess_analyzer.modules.openings import opening_family_stats, opening_stats
 from chess_analyzer.modules.rating import rating_progression
@@ -347,6 +348,31 @@ elif active_section == "Game detail":
         if moves_df.empty:
             st.info("No move data for this game.")
         else:
+            pgn_text = summary.get("pgn", "")
+            total = total_plies(pgn_text)
+            default_ply = min(jump_ply, total) if jump_ply is not None else total
+
+            board_col, info_col = st.columns([2, 1])
+            with board_col:
+                ply = st.slider("Move", min_value=0, max_value=total, value=default_ply,
+                                 key=f"board_ply_{game_id}")
+                current = moves_df[moves_df["ply"] == ply]
+                best_move_uci = current.iloc[0]["best_move_uci"] if not current.empty else None
+                svg = board_svg_at_ply(pgn_text, ply, best_move_uci=best_move_uci, size=420)
+                st.iframe(svg, height=460)
+
+            with info_col:
+                if ply == 0:
+                    st.write("Starting position")
+                else:
+                    m = current.iloc[0]
+                    st.markdown(f"**Move {m['move_number']} ({m['color']}): {m['san']}**")
+                    st.write(f"Classification: {m['flag']} {m['classification']}")
+                    st.write(f"Centipawn loss: {m['cp_loss']}")
+                    st.write(f"Eval (White POV): {m['eval_white_pov']}")
+                    if m["classification"] != "ok" and pd.notna(m["best_move_uci"]):
+                        st.write(f"Engine preferred: `{m['best_move_uci']}` (green arrow)")
+
             if jump_ply is not None:
                 jumped = moves_df[moves_df["ply"] == jump_ply]
                 if not jumped.empty:

@@ -111,6 +111,7 @@ def analyze_game(engine: chess.engine.SimpleEngine, pgn_text: str, depth: int = 
             "phase": _phase(board, fullmove_number),
             "clock_seconds": clock,
             "time_pressure": int(clock is not None and clock <= TIME_PRESSURE_SECONDS),
+            "best_move_uci": best_move.uci() if best_move is not None else None,
         })
 
         info_before = info_after
@@ -190,14 +191,15 @@ def analyze_pending_games(
                         INSERT OR REPLACE INTO moves (
                             game_id, ply, move_number, color, san, uci,
                             eval_cp_before, eval_cp_after, cp_loss, is_best,
-                            classification, phase, clock_seconds, time_pressure
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            classification, phase, clock_seconds, time_pressure,
+                            best_move_uci
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             row["id"], mr["ply"], mr["move_number"], mr["color"],
                             mr["san"], mr["uci"], mr["eval_cp_before"], mr["eval_cp_after"],
                             mr["cp_loss"], mr["is_best"], mr["classification"], mr["phase"],
-                            mr["clock_seconds"], mr["time_pressure"],
+                            mr["clock_seconds"], mr["time_pressure"], mr["best_move_uci"],
                         ),
                     )
                 conn.execute("UPDATE games SET analyzed = 1 WHERE id = ?", (row["id"],))
