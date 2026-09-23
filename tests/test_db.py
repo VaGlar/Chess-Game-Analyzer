@@ -161,3 +161,44 @@ def test_migration_adds_best_move_uci_to_pre_existing_moves_table(tmp_path):
     assert row["san"] == "e4"  # pre-existing data preserved
     assert row["best_move_uci"] is None  # new column present, defaulted
     migrated.close()
+
+
+def test_migration_adds_result_reason_to_pre_existing_games_table(tmp_path):
+    """games shipped before result_reason existed (added for the "how did
+    the game actually end" vs. accuracy breakdown). Same in-place migration
+    requirement as the other columns above.
+    """
+    db_path = str(tmp_path / "old_games.db")
+    raw = sqlite3.connect(db_path)
+    raw.execute("""
+        CREATE TABLE games (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            uuid TEXT UNIQUE NOT NULL,
+            username TEXT NOT NULL,
+            played_at TEXT,
+            time_control TEXT,
+            time_class TEXT,
+            color TEXT,
+            result TEXT,
+            my_rating INTEGER,
+            opponent_rating INTEGER,
+            opponent_username TEXT,
+            opening_eco TEXT,
+            opening_name TEXT,
+            pgn TEXT NOT NULL,
+            url TEXT,
+            analyzed INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    raw.execute("""
+        INSERT INTO games (uuid, username, result, pgn, analyzed)
+        VALUES ('g1', 'tester', 'loss', '[Event "Test"]', 1)
+    """)
+    raw.commit()
+    raw.close()
+
+    migrated = init_db(db_path)
+    row = migrated.execute("SELECT result, result_reason FROM games WHERE id = 1").fetchone()
+    assert row["result"] == "loss"  # pre-existing data preserved
+    assert row["result_reason"] is None  # new column present, defaulted
+    migrated.close()

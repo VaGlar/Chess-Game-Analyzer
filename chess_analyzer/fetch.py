@@ -14,6 +14,21 @@ HEADERS = {"User-Agent": CHESS_COM_USER_AGENT}
 
 _PGN_HEADER_RE = re.compile(r'\[(\w+)\s+"(.*)"\]')
 
+# Best-effort mapping from a PGN's free-text Termination header (all that's
+# left to go on when backfilling games fetched before result_reason existed
+# -- the original chess.com API response isn't kept around) to the same
+# vocabulary the chess.com API itself uses for a fresh fetch.
+_TERMINATION_PATTERNS = [
+    ("checkmated", re.compile(r"checkmate", re.IGNORECASE)),
+    ("timeout", re.compile(r"\btime\b", re.IGNORECASE)),
+    ("resigned", re.compile(r"resignation", re.IGNORECASE)),
+    ("abandoned", re.compile(r"abandon", re.IGNORECASE)),
+    ("stalemate", re.compile(r"stalemate", re.IGNORECASE)),
+    ("repetition", re.compile(r"repetition", re.IGNORECASE)),
+    ("insufficient", re.compile(r"insufficient", re.IGNORECASE)),
+    ("agreed", re.compile(r"agreement", re.IGNORECASE)),
+]
+
 
 def _pgn_headers(pgn: str) -> dict:
     return {m.group(1): m.group(2) for m in _PGN_HEADER_RE.finditer(pgn)}
@@ -97,7 +112,8 @@ def inserted_row(conn: sqlite3.Connection, username: str, game: dict) -> bool:
                   "agreed": "draw", "repetition": "draw", "stalemate": "draw",
                   "insufficient": "draw", "50move": "draw", "abandoned": "loss",
                   "timevsinsufficient": "draw"}
-    result = result_map.get(mine.get("result", ""), mine.get("result", ""))
+    result_reason = mine.get("result", "")
+    result = result_map.get(result_reason, result_reason)
 
     headers = _pgn_headers(pgn)
 
@@ -106,9 +122,9 @@ def inserted_row(conn: sqlite3.Connection, username: str, game: dict) -> bool:
             """
             INSERT INTO games (
                 uuid, username, played_at, time_control, time_class, color,
-                result, my_rating, opponent_rating, opponent_username,
+                result, result_reason, my_rating, opponent_rating, opponent_username,
                 opening_eco, opening_name, pgn, url
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 uuid,
@@ -118,6 +134,7 @@ def inserted_row(conn: sqlite3.Connection, username: str, game: dict) -> bool:
                 game.get("time_class"),
                 color,
                 result,
+                result_reason,
                 mine.get("rating"),
                 opp.get("rating"),
                 opp.get("username"),
@@ -130,6 +147,39 @@ def inserted_row(conn: sqlite3.Connection, username: str, game: dict) -> bool:
         return True
     except sqlite3.IntegrityError:
         return False
+
+
+def _termination_from_pgn(headers: dict) -> Optional[str]:
+    """Best-effort recovery of a chess.com-style termination code from a
+    PGN's free-text Termination header, e.g. "White won by checkmate" ->
+    "checkmated". Only used for backfilling games fetched before
+    result_reason existed -- a fresh fetch stores the API's own exact code.
+    """
+    termination = headers.get("Termination", "")
+    for code, pattern in _TERMINATION_PATTERNS:
+        if pattern.search(termination):
+            return code
+    return None
+
+
+def backfill_result_reason(conn: sqlite3.Connection) -> int:
+    """Recover result_reason for already-stored games from their saved PGN's
+    Termination header. Lets a "how did the game actually end" breakdown
+    (timeout vs. checkmate vs. resignation) work for games fetched before
+    this column existed, without needing to re-hit the chess.com API.
+    """
+    rows = conn.execute(
+        "SELECT id, pgn FROM games WHERE result_reason IS NULL"
+    ).fetchall()
+    updated = 0
+    for row in rows:
+        reason = _termination_from_pgn(_pgn_headers(row["pgn"]))
+        if reason is None:
+            continue
+        conn.execute("UPDATE games SET result_reason = ? WHERE id = ?", (reason, row["id"]))
+        updated += 1
+    conn.commit()
+    return updated
 
 
 def backfill_opening_names(conn: sqlite3.Connection) -> int:

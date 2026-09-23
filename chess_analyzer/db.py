@@ -73,6 +73,9 @@ _COLUMN_MIGRATIONS = {
     "moves": [
         ("best_move_uci", "TEXT"),
     ],
+    "games": [
+        ("result_reason", "TEXT"),
+    ],
 }
 
 
