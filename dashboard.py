@@ -7,6 +7,7 @@ import plotly.express as px
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
+from chess_analyzer.analysis import backfill_mate_score_clamp
 from chess_analyzer.background import reconcile_stale_status, start_background_analysis
 from chess_analyzer.config import DB_PATH, ENGINE_DEPTH, STOCKFISH_PATH
 from chess_analyzer.db import get_analysis_status, init_db, request_cancel
@@ -32,6 +33,20 @@ from chess_analyzer.modules.worst_moves import worst_moves
 st.set_page_config(page_title="Chess Game Analyzer", layout="wide")
 
 conn = init_db(DB_PATH)
+
+
+@st.cache_resource
+def _run_mate_score_backfill_once():
+    """One-time self-heal for games analyzed before MATE_SCORE was clamped
+    to 1000cp: re-clamps stored eval_cp_before/after and recomputes the
+    cp_loss/classification derived from them, so accuracy/ACPL are correct
+    without requiring shell access to the deployed DB. No-ops instantly on
+    every rerun after the first since it only touches out-of-range rows.
+    """
+    return backfill_mate_score_clamp(conn)
+
+
+_run_mate_score_backfill_once()
 
 st.sidebar.title("Chess Game Analyzer")
 username = st.sidebar.text_input("chess.com username", value=st.session_state.get("username", ""))
