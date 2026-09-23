@@ -124,6 +124,18 @@ def _spawn_engine(stockfish_path: str, threads: int, hash_mb: int) -> chess.engi
     return engine
 
 
+def _safe_quit(engine: chess.engine.SimpleEngine) -> None:
+    """Best-effort engine shutdown. If the process/event loop already died
+    (OOM kill, crash, resource starvation — anything), quit() itself can
+    raise; that must never take down the whole analysis run, since we're
+    discarding this engine either way.
+    """
+    try:
+        engine.quit()
+    except Exception:
+        pass
+
+
 def analyze_pending_games(
     conn: Optional[sqlite3.Connection] = None,
     stockfish_path: str = STOCKFISH_PATH,
@@ -167,7 +179,7 @@ def analyze_pending_games(
                 if should_cancel and should_cancel():
                     break
                 if restart_every and games_on_current_engine >= restart_every:
-                    engine.quit()
+                    _safe_quit(engine)
                     engine = _spawn_engine(stockfish_path, threads, hash_mb)
                     games_on_current_engine = 0
 
@@ -195,7 +207,7 @@ def analyze_pending_games(
                 if progress_callback:
                     progress_callback(count, total)
         finally:
-            engine.quit()
+            _safe_quit(engine)
     finally:
         if own_conn:
             conn.close()
