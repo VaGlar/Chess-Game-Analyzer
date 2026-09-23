@@ -17,11 +17,13 @@ ENGINE_THREADS = int(os.environ.get("CHESS_ANALYZER_THREADS", str(os.cpu_count()
 ENGINE_HASH_MB = int(os.environ.get("CHESS_ANALYZER_HASH_MB", "128"))
 
 # Restart the Stockfish process after this many games in a single analysis
-# run. A single long-lived engine process can slow down over a long run
-# (hash table fill/fragmentation); a periodic fresh process is cheap
-# insurance against that, invisible in the UI since the run itself doesn't
-# stop — just the underlying process gets swapped out between games.
-ENGINE_RESTART_EVERY_N_GAMES = int(os.environ.get("CHESS_ANALYZER_RESTART_EVERY", "2"))
+# run (0 disables it). Tried as a fix for a slowdown that turned out to be
+# CPU-credit throttling on a constrained shared-cpu-1x Fly VM, not engine
+# process staleness — it didn't help, and the extra process churn under
+# that same resource pressure correlated with a real crash ("engine event
+# loop dead": a freshly spawned engine dying almost immediately). Off by
+# default; still available for anyone with headroom to experiment with.
+ENGINE_RESTART_EVERY_N_GAMES = int(os.environ.get("CHESS_ANALYZER_RESTART_EVERY", "0"))
 
 # Centipawn-loss thresholds used to classify a move.
 INACCURACY_CP = 50

@@ -7,7 +7,7 @@ import shutil
 import chess.engine
 import pytest
 
-from chess_analyzer.analysis import analyze_game, analyze_pending_games
+from chess_analyzer.analysis import _safe_quit, analyze_game, analyze_pending_games
 from chess_analyzer.db import init_db
 from chess_analyzer.fetch import inserted_row
 
@@ -150,4 +150,32 @@ def test_analyze_pending_games_should_cancel_stops_after_current_game(engine):
     assert n == 1
     remaining_pending = conn.execute("SELECT COUNT(*) FROM games WHERE analyzed = 0").fetchone()[0]
     assert remaining_pending == 2
+    conn.close()
+
+
+def test_safe_quit_swallows_a_dead_engine(engine):
+    """Regression: an engine whose process/event loop already died (crash,
+    OOM, resource starvation) raises EngineTerminatedError("engine event
+    loop dead") from *any* further method call, including quit() itself.
+    _safe_quit must never let that propagate and take down a whole run.
+    """
+    dead = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
+    dead.quit()  # now genuinely shut down
+    with pytest.raises(chess.engine.EngineTerminatedError):
+        dead.configure({"Threads": 1})  # confirms the dead state actually raises
+    _safe_quit(dead)  # must not raise
+
+
+def test_analyze_pending_games_restart_disabled_by_default(engine):
+    """restart_every_n_games defaults to 0 (disabled) — confirms the config
+    default actually reads as "off" through the whole call, not just in
+    isolation. Regression for the crash traced back to that feature.
+    """
+    conn = init_db(":memory:")
+    _seed_blunder_game(conn, "nodefault0")
+    conn.commit()
+    from chess_analyzer.config import ENGINE_RESTART_EVERY_N_GAMES
+    assert ENGINE_RESTART_EVERY_N_GAMES == 0
+    n = analyze_pending_games(conn=conn, stockfish_path=STOCKFISH_PATH, depth=6)
+    assert n == 1
     conn.close()
