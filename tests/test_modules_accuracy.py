@@ -1,4 +1,10 @@
-from chess_analyzer.modules.accuracy import _move_accuracy, _win_percent, accuracy_trend, per_game_accuracy
+from chess_analyzer.modules.accuracy import (
+    _game_accuracy,
+    _move_accuracy,
+    _win_percent,
+    accuracy_trend,
+    per_game_accuracy,
+)
 
 
 def test_win_percent_is_50_at_equal_eval():
@@ -66,6 +72,42 @@ def test_per_game_accuracy_clamped_mate_scores_dont_blow_up_acpl(conn, make_game
 
     df = per_game_accuracy(conn, "tester")
     assert df.iloc[0]["acpl"] < 100
+
+
+def test_game_accuracy_harmonic_mean_punishes_a_single_blunder_more_than_plain_average():
+    """Regression: a plain mean of per-move accuracy lets a handful of easy
+    100% moves (opening theory, forced recaptures) dilute one real blunder
+    into a still-high game score. Lichess folds in a harmonic mean
+    specifically to stop that -- a single low value should pull the game
+    score down noticeably below the plain average.
+    """
+    win_percent_by_ply = {1: 50.0, 2: 50.0, 3: 50.0, 4: 50.0, 5: 50.0}
+    # four perfect moves, one disaster
+    own_move_accuracy = [(1, 100.0), (2, 100.0), (3, 100.0), (4, 100.0), (5, 10.0)]
+
+    plain_average = sum(a for _, a in own_move_accuracy) / len(own_move_accuracy)
+    game_accuracy = _game_accuracy(win_percent_by_ply, own_move_accuracy)
+    assert game_accuracy < plain_average
+
+
+def test_game_accuracy_downweights_moves_in_an_already_decided_position():
+    """A blunder played while the position around it was already settled
+    (win% pinned near 0, barely moving either way) should count for less
+    than the identical-sized blunder played in a sharp, still-swinging
+    position -- that's the concrete mechanism behind losses often scoring
+    misleadingly high on a flat average: most of a lost game's moves happen
+    after the result is no longer in doubt.
+    """
+    edges = {1: 50.0, 2: 50.0, 8: 50.0, 9: 50.0}
+    sharp_series = {**edges, 3: 20.0, 4: 70.0, 5: 15.0, 6: 80.0, 7: 25.0}
+    decided_series = {**edges, 3: 3.0, 4: 2.0, 5: 2.0, 6: 3.0, 7: 2.0}
+
+    own_move_accuracy = [(p, 95.0) for p in range(1, 10)]
+    own_move_accuracy[4] = (5, 20.0)  # the blunder, at ply 5 in both scenarios
+
+    sharp_accuracy = _game_accuracy(sharp_series, own_move_accuracy)
+    decided_accuracy = _game_accuracy(decided_series, own_move_accuracy)
+    assert decided_accuracy > sharp_accuracy
 
 
 def test_accuracy_trend_adds_rolling_column(conn, make_game, make_move):
