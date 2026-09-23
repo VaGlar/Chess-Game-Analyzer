@@ -13,6 +13,7 @@ _GAME_DEFAULTS = {
     "time_class": "blitz",
     "color": "white",
     "result": "win",
+    "result_reason": "win",
     "my_rating": 1200,
     "opponent_rating": 1200,
     "opponent_username": "opp",
@@ -60,10 +61,10 @@ def make_game(conn):
             """
             INSERT INTO games (
                 uuid, username, played_at, time_control, time_class, color,
-                result, my_rating, opponent_rating, opponent_username,
+                result, result_reason, my_rating, opponent_rating, opponent_username,
                 opening_eco, opening_name, pgn, url, analyzed
             ) VALUES (:uuid, :username, :played_at, :time_control, :time_class,
-                      :color, :result, :my_rating, :opponent_rating,
+                      :color, :result, :result_reason, :my_rating, :opponent_rating,
                       :opponent_username, :opening_eco, :opening_name, :pgn,
                       :url, :analyzed)
             """,

@@ -11,7 +11,7 @@ from chess_analyzer.analysis import backfill_mate_score_clamp
 from chess_analyzer.background import reconcile_stale_status, start_background_analysis
 from chess_analyzer.config import DB_PATH, ENGINE_DEPTH, STOCKFISH_PATH
 from chess_analyzer.db import get_analysis_status, init_db, request_cancel
-from chess_analyzer.fetch import fetch_games
+from chess_analyzer.fetch import backfill_result_reason, fetch_games
 from chess_analyzer.modules.accuracy import accuracy_trend, per_game_accuracy
 from chess_analyzer.modules.blunders import (
     blunder_rate_by_phase,
@@ -22,6 +22,7 @@ from chess_analyzer.modules.board_view import board_svg_at_ply, total_plies
 from chess_analyzer.modules.game_detail import game_moves, game_summary, games_for_selector
 from chess_analyzer.modules.openings import opening_family_stats, opening_stats
 from chess_analyzer.modules.rating import rating_progression
+from chess_analyzer.modules.termination import accuracy_by_termination
 from chess_analyzer.modules.time_management import time_by_phase
 from chess_analyzer.modules.win_loss import (
     win_rate_by_color,
@@ -46,7 +47,18 @@ def _run_mate_score_backfill_once():
     return backfill_mate_score_clamp(conn)
 
 
+@st.cache_resource
+def _run_result_reason_backfill_once():
+    """One-time recovery of result_reason (timeout/checkmate/resignation/...)
+    for games fetched before that column existed, from their stored PGN's
+    Termination header. Powers the "how did the game actually end" vs.
+    accuracy breakdown without needing to re-fetch anything.
+    """
+    return backfill_result_reason(conn)
+
+
 _run_mate_score_backfill_once()
+_run_result_reason_backfill_once()
 
 st.sidebar.title("Chess Game Analyzer")
 username = st.sidebar.text_input("chess.com username", value=st.session_state.get("username", ""))
@@ -230,6 +242,24 @@ elif active_section == "Accuracy score":
             c[5].write(f"{row['accuracy']}%")
             if c[6].button("→", key=f"jump_acc_{row['game_id']}"):
                 jump_to_game(int(row["game_id"]))
+
+    st.subheader("Accuracy by how the game ended")
+    st.caption(
+        "A loss with ordinary accuracy that keeps showing up as \"timeout\" is a "
+        "time-management problem, not a chess one -- this splits accuracy by the "
+        "actual game-ending reason instead of averaging it all together."
+    )
+    term_df = accuracy_by_termination(conn, username)
+    if term_df.empty:
+        st.info("No move data yet.")
+    else:
+        fig = px.bar(term_df, x="termination", y="avg_accuracy", color="result", barmode="group",
+                     text="avg_accuracy", hover_data=["games"],
+                     labels={"termination": "How the game ended", "avg_accuracy": "Avg. accuracy (%)",
+                             "result": "Result"})
+        fig.update_traces(texttemplate="%{text}%", textposition="outside")
+        st.plotly_chart(fig, width="stretch")
+        st.dataframe(term_df, width="stretch", hide_index=True)
 
 elif active_section == "Worst moves":
     st.subheader("Your worst individual moves")

@@ -8,7 +8,7 @@ import argparse
 from chess_analyzer.analysis import analyze_pending_games, backfill_mate_score_clamp
 from chess_analyzer.config import DB_PATH, ENGINE_DEPTH, STOCKFISH_PATH
 from chess_analyzer.db import init_db
-from chess_analyzer.fetch import backfill_opening_names, fetch_games
+from chess_analyzer.fetch import backfill_opening_names, backfill_result_reason, fetch_games
 
 
 def main():
@@ -27,6 +27,7 @@ def main():
 
     sub.add_parser("backfill-openings", help="Re-derive opening names from stored PGNs")
     sub.add_parser("backfill-mate-scores", help="Clamp unclamped mate scores in already-analyzed moves")
+    sub.add_parser("backfill-termination", help="Recover result_reason from stored PGNs' Termination header")
 
     args = parser.parse_args()
     conn = init_db(DB_PATH)
@@ -44,6 +45,9 @@ def main():
     elif args.command == "backfill-mate-scores":
         n = backfill_mate_score_clamp(conn)
         print(f"Re-clamped mate scores for {n} moves")
+    elif args.command == "backfill-termination":
+        n = backfill_result_reason(conn)
+        print(f"Recovered result_reason for {n} games")
 
     conn.close()
 
