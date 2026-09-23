@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS moves (
     phase TEXT NOT NULL,
     clock_seconds INTEGER,
     time_pressure INTEGER NOT NULL DEFAULT 0,
+    best_move_uci TEXT,
     UNIQUE(game_id, ply)
 );
 
@@ -62,12 +63,17 @@ CREATE TABLE IF NOT EXISTS analysis_status (
 );
 """
 
-# analysis_status predates last_progress_at/ema_seconds; CREATE TABLE IF NOT
-# EXISTS won't add columns to an already-deployed DB, so migrate by hand.
-_ANALYSIS_STATUS_MIGRATIONS = [
-    ("last_progress_at", "TEXT"),
-    ("ema_seconds", "REAL"),
-]
+# CREATE TABLE IF NOT EXISTS won't add columns to an already-deployed DB, so
+# columns added after the initial release are migrated in by hand here.
+_COLUMN_MIGRATIONS = {
+    "analysis_status": [
+        ("last_progress_at", "TEXT"),
+        ("ema_seconds", "REAL"),
+    ],
+    "moves": [
+        ("best_move_uci", "TEXT"),
+    ],
+}
 
 
 def get_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
@@ -86,10 +92,11 @@ def init_db(db_path: str = DB_PATH) -> sqlite3.Connection:
     conn.execute(
         "INSERT OR IGNORE INTO analysis_status (id, running, done, total) VALUES (1, 0, 0, 0)"
     )
-    existing_columns = {row["name"] for row in conn.execute("PRAGMA table_info(analysis_status)")}
-    for column, sql_type in _ANALYSIS_STATUS_MIGRATIONS:
-        if column not in existing_columns:
-            conn.execute(f"ALTER TABLE analysis_status ADD COLUMN {column} {sql_type}")
+    for table, migrations in _COLUMN_MIGRATIONS.items():
+        existing_columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        for column, sql_type in migrations:
+            if column not in existing_columns:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}")
     conn.commit()
     return conn
 
