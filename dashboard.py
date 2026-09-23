@@ -126,8 +126,11 @@ def jump_to_game(game_id: int, ply: int | None = None) -> None:
     st.rerun()
 
 
-active_section = st.radio("Section", SECTIONS, horizontal=True, key="active_section",
-                           label_visibility="collapsed")
+menu_col, _spacer = st.columns([1, 8])
+with menu_col:
+    with st.popover(f"☰ {st.session_state['active_section']}"):
+        st.radio("Section", SECTIONS, key="active_section", label_visibility="collapsed")
+active_section = st.session_state["active_section"]
 
 if active_section == "Rating":
     st.subheader("Rating over time")
@@ -352,7 +355,14 @@ elif active_section == "Game detail":
             total = total_plies(pgn_text)
             default_ply = min(jump_ply, total) if jump_ply is not None else total
 
-            board_col, info_col = st.columns([2, 1])
+            if jump_ply is not None:
+                jumped = moves_df[moves_df["ply"] == jump_ply]
+                if not jumped.empty:
+                    m = jumped.iloc[0]
+                    st.info(f"Jumped to move {m['move_number']} ({m['color']}): "
+                            f"**{m['san']}** — {m['cp_loss']} cp lost")
+
+            board_col, table_col = st.columns([1, 1])
             with board_col:
                 ply = st.slider("Move", min_value=0, max_value=total, value=default_ply,
                                  key=f"board_ply_{game_id}")
@@ -361,24 +371,26 @@ elif active_section == "Game detail":
                 svg = board_svg_at_ply(pgn_text, ply, best_move_uci=best_move_uci, size=420)
                 st.iframe(svg, height=460)
 
-            with info_col:
                 if ply == 0:
                     st.write("Starting position")
                 else:
                     m = current.iloc[0]
                     st.markdown(f"**Move {m['move_number']} ({m['color']}): {m['san']}**")
-                    st.write(f"Classification: {m['flag']} {m['classification']}")
-                    st.write(f"Centipawn loss: {m['cp_loss']}")
-                    st.write(f"Eval (White POV): {m['eval_white_pov']}")
+                    st.write(f"Classification: {m['flag']} {m['classification']} "
+                             f"— Centipawn loss: {m['cp_loss']} — Eval (White POV): {m['eval_white_pov']}")
                     if m["classification"] != "ok" and pd.notna(m["best_move_uci"]):
                         st.write(f"Engine preferred: `{m['best_move_uci']}` (green arrow)")
 
-            if jump_ply is not None:
-                jumped = moves_df[moves_df["ply"] == jump_ply]
-                if not jumped.empty:
-                    m = jumped.iloc[0]
-                    st.info(f"Jumped to move {m['move_number']} ({m['color']}): "
-                            f"**{m['san']}** — {m['cp_loss']} cp lost")
+            with table_col:
+                display_cols = ["ply", "move_number", "color", "san", "flag", "cp_loss",
+                                 "classification", "phase", "clock_seconds"]
+                styler = moves_df[display_cols].style
+                styler = styler.apply(
+                    lambda r: ["background-color: #d6e8ff" if r["ply"] == ply else
+                                ("background-color: #fff3b0" if jump_ply is not None and r["ply"] == jump_ply else "")
+                                for _ in r], axis=1,
+                )
+                st.dataframe(styler, width="stretch", hide_index=True, height=480)
 
             fig = px.line(moves_df, x="ply", y="eval_white_pov", markers=True,
                           labels={"ply": "Ply", "eval_white_pov": "Eval (White POV, cp)"})
@@ -387,16 +399,5 @@ elif active_section == "Game detail":
             if not blunder_rows.empty:
                 fig.add_scatter(x=blunder_rows["ply"], y=blunder_rows["eval_white_pov"], mode="markers",
                                 marker=dict(color="red", size=12, symbol="x"), name="Blunder")
-            if jump_ply is not None:
-                fig.add_vline(x=jump_ply, line_dash="dash", line_color="blue")
+            fig.add_vline(x=ply, line_dash="dash", line_color="blue")
             st.plotly_chart(fig, width="stretch")
-
-            display_cols = ["ply", "move_number", "color", "san", "flag", "cp_loss",
-                             "classification", "phase", "clock_seconds"]
-            styler = moves_df[display_cols].style
-            if jump_ply is not None:
-                styler = styler.apply(
-                    lambda r: ["background-color: #fff3b0" if r["ply"] == jump_ply else ""
-                               for _ in r], axis=1,
-                )
-            st.dataframe(styler, width="stretch", hide_index=True)
