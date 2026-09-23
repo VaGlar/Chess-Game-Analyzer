@@ -5,7 +5,7 @@
 """
 import argparse
 
-from chess_analyzer.analysis import analyze_pending_games
+from chess_analyzer.analysis import analyze_pending_games, backfill_mate_score_clamp
 from chess_analyzer.config import DB_PATH, ENGINE_DEPTH, STOCKFISH_PATH
 from chess_analyzer.db import init_db
 from chess_analyzer.fetch import backfill_opening_names, fetch_games
@@ -26,6 +26,7 @@ def main():
     analyze_p.add_argument("--limit", type=int, default=None)
 
     sub.add_parser("backfill-openings", help="Re-derive opening names from stored PGNs")
+    sub.add_parser("backfill-mate-scores", help="Clamp unclamped mate scores in already-analyzed moves")
 
     args = parser.parse_args()
     conn = init_db(DB_PATH)
@@ -40,6 +41,9 @@ def main():
     elif args.command == "backfill-openings":
         n = backfill_opening_names(conn)
         print(f"Updated opening_name for {n} games")
+    elif args.command == "backfill-mate-scores":
+        n = backfill_mate_score_clamp(conn)
+        print(f"Re-clamped mate scores for {n} moves")
 
     conn.close()
 

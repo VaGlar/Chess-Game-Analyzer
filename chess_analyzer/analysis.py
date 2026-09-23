@@ -26,7 +26,7 @@ from chess_analyzer.config import (
 )
 from chess_analyzer.db import get_connection, init_db
 
-MATE_SCORE = 100_000
+MATE_SCORE = 1000  # clamp: a "mate in N" is decisive, not literally +-100000cp
 _CLOCK_RE = re.compile(r"\[%clk\s+(\d+):(\d+):(\d+(?:\.\d+)?)\]")
 
 
@@ -214,6 +214,42 @@ def analyze_pending_games(
         if own_conn:
             conn.close()
     return count
+
+
+def backfill_mate_score_clamp(conn: sqlite3.Connection) -> int:
+    """Re-clamp eval_cp_before/eval_cp_after for moves analyzed before
+    MATE_SCORE was lowered from 100000 to 1000, and recompute the cp_loss/
+    classification that were derived from those unclamped values (an
+    unclamped mate score pollutes every average or accuracy figure built
+    from cp_loss). Only touches rows that actually exceed the current
+    MATE_SCORE -- everything else is already correct.
+    """
+    def _clamp(value):
+        if value is None:
+            return None
+        return max(-MATE_SCORE, min(MATE_SCORE, value))
+
+    rows = conn.execute(
+        """
+        SELECT id, eval_cp_before, eval_cp_after, is_best FROM moves
+        WHERE ABS(eval_cp_before) > ? OR ABS(eval_cp_after) > ?
+        """,
+        (MATE_SCORE, MATE_SCORE),
+    ).fetchall()
+    updated = 0
+    for row in rows:
+        before = _clamp(row["eval_cp_before"])
+        after = _clamp(row["eval_cp_after"])
+        cp_loss = max(0, before - after)
+        classification = "ok" if row["is_best"] else _classify(cp_loss)
+        conn.execute(
+            "UPDATE moves SET eval_cp_before = ?, eval_cp_after = ?, cp_loss = ?, "
+            "classification = ? WHERE id = ?",
+            (before, after, cp_loss, classification, row["id"]),
+        )
+        updated += 1
+    conn.commit()
+    return updated
 
 
 if __name__ == "__main__":
